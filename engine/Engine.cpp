@@ -121,6 +121,35 @@ int Engine::chooseHit (const Instrument& in, int instrument, float velocity, flo
     const float range = std::max (-hits.front().level, 30.0f) * dynamics;
     const float target = -range * (1.0f - juce::jlimit (0.0f, 1.0f, velocity));
 
+    if (in.layered)
+    {
+        // A drum machine's: the layer nearest that loudness, its takes in turn (never another
+        // layer's hit, which would sound like a harder or softer one)
+        int nearest = 0;
+
+        for (int h = 1; h < n; ++h)
+            if (std::abs (hits[(size_t) h].level - target) < std::abs (hits[(size_t) nearest].level - target))
+                nearest = h;
+
+        auto& last = current->lastHits[(size_t) instrument];
+        int takes[8] {}, takeCount = 0;
+
+        for (int h = 0; h < n && takeCount < 8; ++h)
+            if (hits[(size_t) h].level == hits[(size_t) nearest].level)
+                takes[takeCount++] = h;
+
+        int pick = takes[0];
+
+        for (int t = 0; t < takeCount; ++t)
+            if (takes[t] == last[0])
+                pick = takes[(t + 1) % takeCount];
+
+        last[1] = last[0];
+        last[0] = pick;
+        gainDb = juce::jlimit (-40.0f, 6.0f, target - hits[(size_t) pick].level);
+        return pick;
+    }
+
     // The three recorded hits nearest that loudness
     int lo = (int) (std::lower_bound (hits.begin(), hits.end(), target, [] (const Hit& h, float t) { return h.level < t; }) - hits.begin());
     int hi = lo;

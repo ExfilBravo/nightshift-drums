@@ -177,4 +177,9 @@ void DrumsEditor::writeGroove (const juce::String& words)
     groovePage->writeGroove (words, false);
 }
 
+void DrumsEditor::scrollKitsToEnd()
+{
+    kitsPage->scrollToEnd();
+}
+
 } // namespace drums

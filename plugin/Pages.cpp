@@ -167,9 +167,11 @@ void KitPage::paint (juce::Graphics& g)
     auto words = s.withTrimmedLeft (600);
     g.setColour (line.isNotEmpty() ? text : textDim);
     g.setFont (font (13.0f));
-    g.drawFittedText (line.isNotEmpty() ? line : "Click a drum to play it; Shift for softer. A hi-hat opens at its edge, a snare's rim is a rimshot. "
-                                                 "Right-click for every way to play it.",
-                      words, juce::Justification::centredLeft, 3, 1.0f);
+    const juce::String how = def != nullptr && def->isMachine()
+                                 ? "Click a drum's section to play it; Shift for softer. Its lamp lights as it plays; the step lamps follow the beat."
+                                 : "Click a drum to play it; Shift for softer. A hi-hat opens at its edge, a snare's rim is a rimshot. "
+                                   "Right-click for every way to play it.";
+    g.drawFittedText (line.isNotEmpty() ? line : how, words, juce::Justification::centredLeft, 3, 1.0f);
 }
 
 //==============================================================================
@@ -709,7 +711,7 @@ struct KitsPage::Row : public juce::Component
         get.setButtonText (status.state == S::failed ? "Try again" : (status.bytes > 0 ? "Carry on" : "Get it"));
         stop.setVisible (busy);
         bar.setVisible (busy);
-        remove.setVisible (status.state == S::ready);
+        remove.setVisible (status.state == S::ready && ! def.isMachine());     // a drum machine is built in
         use.setVisible (status.state == S::ready && page.processor.getKitId() != def.id);
         progress = status.progress;
         repaint();
@@ -779,7 +781,8 @@ struct KitsPage::Row : public juce::Component
                                           + (status.bytesPerSecond > 0 ? ", " + juce::File::descriptionOfSizeInBytes ((juce::int64) status.bytesPerSecond) + " a second" : juce::String()); break;
             case S::checking:     words = "Checking the download"; break;
             case S::importing:    words = "Setting it up: every mic of every hit, " + juce::String (juce::roundToInt (status.progress * 100.0f)) + " %"; break;
-            case S::ready:        words = page.processor.getKitId() == def.id ? "Here, and playing" : "Here"; break;
+            case S::ready:        words = def.isMachine() ? (page.processor.getKitId() == def.id ? "Built in, and playing" : "Built in: made as you choose it")
+                                                          : (page.processor.getKitId() == def.id ? "Here, and playing" : "Here"); break;
             case S::failed:       words = status.message; break;
         }
 
@@ -800,7 +803,12 @@ KitsPage::KitsPage (DrumsProcessor& p, std::function<void()> show) : processor (
 {
     for (auto& def : catalog())
         if (def.id != "testkit")
-            addAndMakeVisible (rows.add (new Row (*this, def)));
+            list.addAndMakeVisible (rows.add (new Row (*this, def)));
+
+    viewport.setViewedComponent (&list, false);
+    viewport.setScrollBarsShown (true, false);
+    viewport.setScrollBarThickness (10);
+    addAndMakeVisible (viewport);
 
     changeFolder.onClick = [this]
     {
@@ -849,12 +857,16 @@ void KitsPage::resized()
 {
     auto r = getLocalBounds().reduced (16, 12);
     footer = r.removeFromBottom (76);
+    viewport.setBounds (r);
 
-    for (auto* row : rows)
-    {
-        row->setBounds (r.removeFromTop (150));
-        r.removeFromTop (10);
-    }
+    // The rows, under each other; room for the scroll bar when they're taller than the page
+    constexpr int rowHeight = 150, gap = 10;
+    const int height = rows.size() * (rowHeight + gap) - gap;
+    const int width = r.getWidth() - (height > r.getHeight() ? viewport.getScrollBarThickness() + 6 : 0);
+    list.setSize (width, height);
+
+    for (int i = 0; i < rows.size(); ++i)
+        rows[i]->setBounds (0, i * (rowHeight + gap), width, rowHeight);
 
     changeFolder.setBounds (footer.getRight() - 150, footer.getY() + 8, 150, 28);
     licences.setBounds (changeFolder.getBounds().translated (-160, 0).withWidth (150));
@@ -878,6 +890,8 @@ void KitsPage::showLicences()
                   << "MuldjordKit 3: by Lars Muldjord, DrumGizmo.org. CC BY 4.0.\n\n"
                   << "The pictures of the three kits were generated with an image AI for Nightshift Drums, from descriptions of "
                      "the real kits.\n\n"
+                  << "Nightshift 808 and Nightshift 909: synthesised by Nightshift Drums with NightShift's own drum machine sounds, "
+                     "no samples. Their faces are drawn by Nightshift Drums.\n\n"
                   << "The grooves come from NightShift's offline AI drummer. Nightshift Drums is built on JUCE.\n";
 
             text.setMultiLine (true);
@@ -929,8 +943,8 @@ void KitsPage::paint (juce::Graphics& g)
                 juce::Justification::centredLeft, true);
     g.setColour (textFaint);
     g.setFont (font (12.0f));
-    g.drawFittedText ("The kits are DrumGizmo.org's, free under Creative Commons Attribution 4.0. Their pictures were "
-                      "generated with an image AI from descriptions of the real kits.",
+    g.drawFittedText ("The three acoustic kits are DrumGizmo.org's, free under Creative Commons Attribution 4.0, pictured with an image AI "
+                      "from descriptions of the real kits. The 808 and 909 are synthesised by Nightshift itself.",
                       f, juce::Justification::topLeft, 2, 1.0f);
 }
 

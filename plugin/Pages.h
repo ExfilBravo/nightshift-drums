@@ -119,11 +119,16 @@ public:
     void resized() override;
     void paint (juce::Graphics&) override;
 
+    /** Down to the last rows (drumstool's snapshots of them). */
+    void scrollToEnd()                      { viewport.setViewPosition (0, std::max (0, list.getHeight() - viewport.getHeight())); }
+
 private:
     struct Row;
     DrumsProcessor& processor;
     std::function<void()> showKit;
     juce::OwnedArray<Row> rows;
+    juce::Viewport viewport;                // the rows, scrolling when they don't all fit
+    juce::Component list;
     juce::TextButton changeFolder { "Change folder" }, licences { "Licences" };
     std::unique_ptr<juce::FileChooser> chooser;
     std::unique_ptr<juce::Component> licenceView;

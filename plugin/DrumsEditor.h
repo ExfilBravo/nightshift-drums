@@ -31,6 +31,9 @@ public:
     /** A groove on the Grooves page, as if typed there (for drumstool's snapshots). */
     void writeGroove (const juce::String& words);
 
+    /** The Kits page scrolled to its last rows (for drumstool's snapshots). */
+    void scrollKitsToEnd();
+
 private:
     DrumsProcessor& processor;
     DrumsLookAndFeel lookAndFeel;

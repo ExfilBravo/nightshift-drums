@@ -154,7 +154,7 @@ namespace
         k.id = "drs";
         k.name = "DRS";
         k.folder = "DRS";
-        k.description = "A handmade orange kit lent by Jes Eiler of DRS Drums, with Paiste cymbals, recorded with sticks and with "
+        k.description = "A handmade orange kit lent by Jes Eiler of DRS Drums, with bright, finely lathed cymbals, recorded with sticks and with "
                         "brushes: one rack tom, two floor toms. Warm and open: jazz, funk, soul, pop, indie, rock.";
         k.credit = "DRSKit 2.1 by DrumGizmo.org with DRS Drums, sampled by Deva and Lars Muldjord. CC BY 4.0";
         k.url = "https://drumgizmo.org/kits/DRSKit/DRSKit2_1.zip";
@@ -203,7 +203,7 @@ namespace
         k.id = "muldjord";
         k.name = "Muldjord";
         k.folder = "Muldjord";
-        k.description = "Lars Muldjord's Tama Superstar, recorded for a metal album: two kicks, three rack toms and a floor tom, two rides, "
+        k.description = "Lars Muldjord's own kit, recorded for a metal album: two kicks, three rack toms and a floor tom, two rides, "
                         "two crashes and a china. Big and roomy: heavy rock, metal, doom, stoner, grunge.";
         k.credit = "MuldjordKit 3 by Lars Muldjord, DrumGizmo.org. CC BY 4.0";
         k.url = "https://drumgizmo.org/kits/MuldjordKit/MuldjordKit3.zip";
@@ -240,6 +240,94 @@ namespace
 
         return k;
     }
+
+    //==============================================================================
+    /** A drum machine's section: one of its drums, the notes it answers, and the knobs on its face. */
+    struct Section
+    {
+        const char* id;
+        const char* name;
+        const char* voice;          // the machine's own name for the drum (Machines.cpp)
+        std::vector<int> notes;
+        juce::StringArray knobs;
+    };
+
+    /** One of Nightshift Drums' own drum machines: its sections side by side across the middle of its
+        face (2000 x 1116, as the kits' pictures are), each one a drum to click. */
+    KitDefinition machine (const char* id, const char* name, const char* number, const char* description, std::vector<Section> sections)
+    {
+        KitDefinition k;
+        k.id = id;
+        k.name = name;
+        k.folder = name;
+        k.machine = number;
+        k.description = description;
+        k.credit = "Synthesised by Nightshift Drums with NightShift's own drum machine sounds: built in, nothing to download";
+        k.pictureCredit = "Drawn by Nightshift Drums";
+        k.pictureWidth = 2000;
+        k.pictureHeight = 1116;
+
+        constexpr float left = 60.0f, right = 1940.0f, top = 236.0f, bottom = 756.0f, gap = 8.0f;
+        const auto n = (float) sections.size();
+        const float width = (right - left - gap * (n - 1.0f)) / n;
+
+        for (size_t i = 0; i < sections.size(); ++i)
+        {
+            const auto& s = sections[i];
+            const float x = left + (float) i * (width + gap);
+            auto p = piece (s.id, s.name, polygon ({ { x, top }, { x + width, top }, { x + width, bottom }, { x, bottom } }),
+                            { { s.name, s.voice, s.notes } });
+            p.knobs = s.knobs;
+            k.pieces.push_back (std::move (p));
+        }
+
+        return k;
+    }
+
+    KitDefinition nightshift808()
+    {
+        return machine ("nightshift808", "Nightshift 808", "808",
+                        "Nightshift's own 808-style drum machine, synthesised: a long booming kick, a snappy snare, clap, ticking hats "
+                        "and cowbell. Trap, hip hop, boom bap, R&B, electro, Miami bass, synthwave, lofi.",
+                        { { "kick", "Kick", "kick", { 36, 35 }, { "Level", "Tone", "Decay" } },
+                          { "snare", "Snare", "snare", { 38, 40 }, { "Level", "Tone", "Snap" } },
+                          { "tomLow", "Low tom", "tom_floor", { 43, 41 }, { "Level", "Tune" } },
+                          { "tomMid", "Mid tom", "tom_mid", { 47, 45 }, { "Level", "Tune" } },
+                          { "tomHigh", "High tom", "tom_high", { 50, 48 }, { "Level", "Tune" } },
+                          { "rim", "Rim", "sidestick", { 37 }, { "Level" } },
+                          { "claves", "Claves", "stick_click", { 75, 31 }, { "Level" } },
+                          { "clap", "Clap", "clap", { 39 }, { "Level" } },
+                          { "maracas", "Maracas", "shaker", { 70 }, { "Level" } },
+                          { "cowbell", "Cowbell", "cowbell", { 56 }, { "Level" } },
+                          // Its one cymbal is its crash and its ride
+                          { "cymbal", "Cymbal", "crash", { 49, 57, 51, 59, 52, 55 }, { "Level", "Tone", "Decay" } },
+                          { "hatOpen", "Open hat", "hat_open", { 46 }, { "Level", "Decay" } },
+                          { "hatPedal", "Pedal hat", "hat_pedal", { 44 }, { "Level" } },
+                          { "hatClosed", "Closed hat", "hat_closed", { 42 }, { "Level" } } });
+    }
+
+    KitDefinition nightshift909()
+    {
+        return machine ("nightshift909", "Nightshift 909", "909",
+                        "Nightshift's own 909-style drum machine, synthesised: a punchy kick, a bright snare, clap, sizzling hats, "
+                        "crash and ride. House, techno, garage, drum and bass, electro, dance pop, synthwave.",
+                        { { "kick", "Kick", "kick", { 36, 35 }, { "Tune", "Level", "Decay" } },
+                          { "snare", "Snare", "snare", { 38, 40 }, { "Tune", "Level", "Snap" } },
+                          { "tomLow", "Low tom", "tom_floor", { 43, 41 }, { "Tune", "Level" } },
+                          { "tomMid", "Mid tom", "tom_mid", { 47, 45 }, { "Tune", "Level" } },
+                          { "tomHigh", "High tom", "tom_high", { 50, 48 }, { "Tune", "Level" } },
+                          { "rim", "Rim", "sidestick", { 37 }, { "Level" } },
+                          { "clap", "Clap", "clap", { 39 }, { "Level" } },
+                          { "hatClosed", "Closed hat", "hat_closed", { 42 }, { "Level", "Decay" } },
+                          { "hatPedal", "Pedal hat", "hat_pedal", { 44 }, { "Level" } },
+                          { "hatOpen", "Open hat", "hat_open", { 46 }, { "Level", "Decay" } },
+                          { "crash", "Crash", "crash", { 49, 57, 52, 55 }, { "Level", "Tune" } },
+                          { "ride", "Ride", "ride", { 51, 59 }, { "Level", "Tune" } },
+                          { "bell", "Ride bell", "ride_bell", { 53 }, { "Level" } },
+                          { "cowbell", "Cowbell", "cowbell", { 56 }, { "Level" } },
+                          { "maracas", "Maracas", "shaker", { 70 }, { "Level" } },
+                          { "claves", "Claves", "stick_click", { 75, 31 }, { "Level" } } });
+    }
 }
 
 namespace
@@ -253,6 +341,8 @@ namespace
             k.push_back (crocell());
             k.push_back (drs());
             k.push_back (muldjord());
+            k.push_back (nightshift808());
+            k.push_back (nightshift909());
             return k;
         }();
 

@@ -28,13 +28,35 @@ here when the code changes it.
   close mics on one drum: the loudest is the reference, another is flipped when the strongest
   correlation within ±3 ms is negative.
 
+## Drum machines
+
+| | Nightshift 808 | Nightshift 909 |
+| --- | --- | --- |
+| Drums (sections) | 14 | 16 |
+| Made from | NightShift's `src/audio/Machines.cpp` voices (sound version 2), copied unchanged | the same |
+| Hits | 3 layers x 2 takes a drum: 84 | 96 |
+| Rate, mics | 48 kHz, 1 ("Direct", in the middle) | 48 kHz, 1 |
+| Made in (Windows, 2026-11-15), memory | 0.18 s, 9.1 MB | 0.39 s, 13.8 MB |
+
+- Made in memory when chosen, on the loader thread: each take synthesised as NightShift makes it
+  (trimmed 70 dB under its peak, normalised to NightShift's level for the drum, 6 dB under its studio
+  kits), then set to its layer's level: -21.73, -12.52 and 0 dB. On the engine's velocity curve that
+  puts the changes of layer at velocity 55 and 101, where NightShift's own (1-54, 55-100, 101-127) are.
+- Layered instruments: velocity plays the nearest layer, its takes in turn, at gain target - layer
+  level (-40..+6 dB): loudness follows velocity smoothly, the tone changes at the layers.
+- The hi-hats (closed, pedal, open) are one group: each stops the others, as NightShift's do.
+- Default mix trim: +4.0 dB (the hardest kick, -7 dBFS, through the middle of the pan), as every kit's.
+- The face (2000 x 1116 picture space): a name band, the sections side by side between x 60 and
+  1940 (y 236..756), 16 step keys in fours (y 862..980). Words on it are at least 25.5 picture px
+  (15.4 px shown at 1.25). Thumbnails draw no words.
+
 ## Engine
 
 - Voices: 96; at most 8 of one instrument (the oldest fades over 30 ms). With none free, the oldest
   (a fading one first) is taken.
 - Velocity: target loudness = -max(the instrument's recorded range, 30 dB) × dynamics × (1 - v).
   It plays one of the 3 recorded hits nearest that, never one of the last two it played (when there's
-  another), at gain target - hit level, -40..+6 dB.
+  another), at gain target - hit level, -40..+6 dB. (A drum machine's layered instruments: above.)
 - Groups (the hi-hat): a hit fades every voice of its group over 40 ms. "...Stopped" instruments fade
   their instrument over 30 ms. Aftertouch >= 64 on a note fades that note's instrument over 50 ms.
   All notes off / all sound off: everything over 10 ms.
@@ -67,6 +89,9 @@ here when the code changes it.
 - Designed at 1040 x 660 and shown at 1.25 (1300 x 825). Words at least 12 design px (15 px shown),
   small capitals 11.5 (14.4 px), contrast at least 4.5:1 (3:1 for inactive text).
   `--snapshot ... --textaudit` must report nothing on any page.
+- A click on the kit plays at the next audio block; one more than 300 ms old by then (a host that
+  wasn't calling the plugin, its transport stopped) is dropped rather than played late.
+- The Kits page scrolls when its rows don't all fit.
 
 ## Default mix orientation and level
 
@@ -101,6 +126,9 @@ The stress test plays a dense metal groove with every cymbal, from a real-time t
 audio thread is (from an ordinary thread, the streamer can interrupt it, and blocks of 5-12 ms show up
 that a host would never see). DRS and Muldjord are resampled from 44.1 kHz.
 
-`drumstool --test`: 55 checks, all passing (48 on the test kit, 7 on the downloaded kits: every
-articulation of every piece in each kit's picture sounds, DRS with sticks and with brushes).
+`drumstool --test`: 71 checks, all passing (48 on the test kit, 7 on the downloaded kits: every
+articulation of every piece in each kit's picture sounds, DRS with sticks and with brushes; 16 on the
+drum machines: their note maps, every section on every note, the layers by velocity, the takes in turn,
+their levels, the hi-hat choke, and every hit against NightShift's own WAVs, worst 1.04e-6 of the peak:
+24-bit rounding).
 `drumstool --vst3 <the .vst3>` loads the built plugin as a host would: it plays a snare and opens its window.

@@ -65,7 +65,7 @@ juce_add_plugin(NightshiftDrums
 juce_generate_juce_header(NightshiftDrums)
 target_sources(NightshiftDrums PRIVATE ${DRUMS_SOURCES})
 target_include_directories(NightshiftDrums PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-# JUCE_ASIO: the standalone can open the MiniFuse's ASIO driver (JUCE bundles the SDK)
+# JUCE_ASIO: the standalone can open an audio interface's ASIO driver (JUCE bundles the SDK)
 target_compile_definitions(NightshiftDrums PUBLIC ${DRUMS_DEFINITIONS} JUCE_USE_CUSTOM_PLUGIN_STANDALONE_APP=1 $<$<PLATFORM_ID:Windows>:JUCE_ASIO=1>)
 target_link_libraries(NightshiftDrums PRIVATE
     DrumsArt

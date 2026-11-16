@@ -5,23 +5,25 @@
 #include "DrumsEditor.h"
 #include "Parameters.h"
 #include "common/ScaledEditor.h"
+#include "engine/Machines.h"
 
 namespace drums
 {
 
-/** Loads a kit off the message thread: its index, and every hit's first moments into memory. */
+/** Loads a kit off the message thread: its index, and every hit's first moments into memory (a kit
+    from disk), or every drum made (a drum machine). */
 class DrumsProcessor::Loader : public juce::Thread
 {
 public:
-    Loader (juce::File f, std::atomic<float>& p) : juce::Thread ("Nightshift Drums kit loader"), folder (std::move (f)), progress (p) {}
+    using Make = std::function<std::unique_ptr<LoadedKit> (juce::String& error, std::function<bool()> shouldStop, std::function<void (float)> progress)>;
+
+    Loader (Make m, std::atomic<float>& p) : juce::Thread ("Nightshift Drums kit loader"), make (std::move (m)), progress (p) {}
     ~Loader() override      { stopThread (10000); }
 
     void run() override
     {
         juce::String why;
-        std::shared_ptr<LoadedKit> kit (LoadedKit::open (folder, Engine::preloadSeconds, why,
-                                                         [this] { return threadShouldExit(); },
-                                                         [this] (float p) { progress.store (p); }).release());
+        std::shared_ptr<LoadedKit> kit (make (why, [this] { return threadShouldExit(); }, [this] (float p) { progress.store (p); }).release());
         result = std::move (kit);
         error = why;
         done = true;
@@ -32,7 +34,7 @@ public:
     juce::String error;
 
 private:
-    juce::File folder;
+    Make make;
     std::atomic<float>& progress;
 };
 
@@ -225,10 +227,17 @@ void DrumsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
     juce::ScopedNoDenormals noDenormals;
     const int numSamples = buffer.getNumSamples();
 
+    double beat = -1.0;
+
     if (auto* head = getPlayHead())
         if (const auto pos = head->getPosition())
+        {
             if (pos->getBpm().hasValue())
                 hostBpm = *pos->getBpm();
+
+            if (pos->getIsPlaying() && pos->getPpqPosition().hasValue())
+                beat = *pos->getPpqPosition();
+        }
 
     engine.setStreaming (! isNonRealtime());
     engine.setBleed (bleedParam->load() * 0.01f);
@@ -239,6 +248,13 @@ void DrumsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
     merged.clear();
     merged.addEvents (midi, 0, -1, 0);
     addGrooveNotes (merged, numSamples);
+
+    // Where the music is, for a drum machine's step lights: the host's beat, or the groove player's
+    // when it's auditioning on its own
+    if (beat < 0.0 && groovePlaying.load())
+        beat = (double) groovePosition.load() * grooveLengthQ.load();
+
+    runningBeat = beat;
 
     const bool hasKit = engine.beginBlock();
     auto* rs = hasKit ? resamplerFor (engine.getKitRate()) : nullptr;
@@ -295,13 +311,17 @@ void DrumsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
     const float masterDb = masterParam->load();
     const float master = masterDb <= -59.95f ? 0.0f : juce::Decibels::decibelsToGain (masterDb);
 
-    // Notes from the window, at the start of the block
+    // Notes from the window, at the start of the block: only clicks from just now (a host that stopped
+    // calling us while its transport was stopped mustn't get every click since, all at once, later)
     {
+        const auto now = juce::Time::getMillisecondCounter();
         const auto scope = previewFifo.read (previewFifo.getNumReady());
         scope.forEach ([&] (int index)
         {
-            if (events.size() < events.capacity())
-                events.push_back ({ rs->inputFrameFor (0), 0, previews[(size_t) index].first, previews[(size_t) index].second });
+            const auto& p = previews[(size_t) index];
+
+            if (events.size() < events.capacity() && now - p.at < 300)
+                events.push_back ({ rs->inputFrameFor (0), 0, p.note, p.velocity });
         });
     }
 
@@ -392,7 +412,7 @@ void DrumsProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiB
 void DrumsProcessor::playNote (int note, float velocity)
 {
     const auto scope = previewFifo.write (1);
-    scope.forEach ([&] (int index) { previews[(size_t) index] = { note, velocity }; });
+    scope.forEach ([&] (int index) { previews[(size_t) index] = { note, velocity, juce::Time::getMillisecondCounter() }; });
 }
 
 void DrumsProcessor::setGroove (std::optional<grooves::Groove> groove, int section)
@@ -409,6 +429,7 @@ void DrumsProcessor::setGroove (std::optional<grooves::Groove> groove, int secti
     const juce::SpinLock::ScopedLockType sl (grooveLock);
     grooveNotes.swapWith (notes);
     grooveLength = length;
+    grooveLengthQ = length;
     grooveBpm = bpm;
     grooveAt = 0.0;
 }
@@ -445,7 +466,7 @@ void DrumsProcessor::chooseKit (const juce::String& id, bool freshMix)
     }
 
     juce::String error;
-    auto index = KitIndex::load (library->folderFor (id), error);
+    auto index = def->isMachine() ? std::optional<KitIndex> (machines::outline (*def)) : KitIndex::load (library->folderFor (id), error);
 
     if (! index.has_value())
     {
@@ -471,7 +492,25 @@ void DrumsProcessor::startLoading()
 {
     kitState = KitState::loading;
     loadProgress = 0.0f;
-    loader = std::make_unique<Loader> (library->folderFor (kitId), loadProgress);
+    Loader::Make make;
+
+    if (const auto* def = findKit (kitId); def != nullptr && def->isMachine())
+    {
+        // A drum machine: made now, in memory
+        make = [def = *def] (juce::String& error, std::function<bool()> shouldStop, std::function<void (float)> progress)
+        {
+            return machines::build (def, Engine::preloadSeconds, error, std::move (shouldStop), std::move (progress));
+        };
+    }
+    else
+    {
+        make = [folder = library->folderFor (kitId)] (juce::String& error, std::function<bool()> shouldStop, std::function<void (float)> progress)
+        {
+            return LoadedKit::open (folder, Engine::preloadSeconds, error, std::move (shouldStop), std::move (progress));
+        };
+    }
+
+    loader = std::make_unique<Loader> (std::move (make), loadProgress);
     loader->startThread();
 }
 

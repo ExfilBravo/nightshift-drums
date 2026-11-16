@@ -10,6 +10,15 @@ set "VST3=%LOCALAPPDATA%\Programs\Common\VST3"
 if not exist "%SRC%\VST3\Nightshift Drums.vst3" (echo Build it first: build.cmd Release & exit /b 1)
 
 if not exist "%VST3%" mkdir "%VST3%"
+rem A host with the plugin open holds its binary: it can't be overwritten, but it can be renamed aside.
+rem The host keeps the copy it has open; the next time it starts, it loads this one.
+set "BIN=%VST3%\Nightshift Drums.vst3\Contents\x86_64-win\Nightshift Drums.vst3"
+del "%BIN%.old-*" >nul 2>&1
+del "%BIN%" >nul 2>&1
+if exist "%BIN%" (
+    move /y "%BIN%" "%BIN%.old-%RANDOM%" >nul 2>&1
+    echo A host has Nightshift Drums open: it keeps the one it has until it starts again.
+)
 robocopy "%SRC%\VST3\Nightshift Drums.vst3" "%VST3%\Nightshift Drums.vst3" /E /NFL /NDL /NJH /NJS /NP >nul
 if errorlevel 8 (echo Couldn't copy the VST3 - is a host using it? & exit /b 1)
 

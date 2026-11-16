@@ -85,6 +85,10 @@ juce::var KitIndex::toVar() const
             own << (b ? "1" : "0");
 
         io->setProperty ("own", own);
+
+        if (in.layered)
+            io->setProperty ("layered", true);
+
         juce::Array<juce::var> hits;
 
         for (auto& h : in.hits)
@@ -130,6 +134,7 @@ std::optional<KitIndex> KitIndex::fromVar (const juce::var& v, juce::String& err
             Instrument in;
             in.name = i.getProperty ("name", {}).toString();
             in.group = i.getProperty ("group", {}).toString();
+            in.layered = (bool) i.getProperty ("layered", false);
 
             const auto own = i.getProperty ("own", {}).toString();
 
@@ -202,7 +207,6 @@ std::unique_ptr<LoadedKit> LoadedKit::open (const juce::File& folder, double pre
     std::unique_ptr<LoadedKit> k (new LoadedKit());
     k->kit = std::move (*index);
     k->dir = folder;
-    k->preload = std::max (256, juce::roundToInt (preloadSeconds * k->kit.sampleRate));
     k->map = std::make_unique<juce::MemoryMappedFile> (KitIndex::dataFile (folder), juce::MemoryMappedFile::readOnly, false);
 
     if (k->map->getData() == nullptr || (juce::int64) k->map->getSize() < k->kit.dataBytes)
@@ -211,49 +215,72 @@ std::unique_ptr<LoadedKit> LoadedKit::open (const juce::File& folder, double pre
         return {};
     }
 
+    k->base = static_cast<const juce::uint8*> (k->map->getData());
+    return k->preloadHits (preloadSeconds, error, std::move (shouldStop), std::move (progress)) ? std::move (k) : nullptr;
+}
+
+std::unique_ptr<LoadedKit> LoadedKit::fromMemory (KitIndex index, juce::MemoryBlock samples, double preloadSeconds, juce::String& error)
+{
+    if ((juce::int64) samples.getSize() < index.dataBytes || index.mics.empty())
+    {
+        error = "its samples are cut short";
+        return {};
+    }
+
+    std::unique_ptr<LoadedKit> k (new LoadedKit());
+    k->kit = std::move (index);
+    k->samplesInMemory = std::move (samples);
+    k->base = static_cast<const juce::uint8*> (k->samplesInMemory.getData());
+    return k->preloadHits (preloadSeconds, error, nullptr, nullptr) ? std::move (k) : nullptr;
+}
+
+bool LoadedKit::preloadHits (double preloadSeconds, juce::String& error, std::function<bool()> shouldStop, std::function<void (float)> progress)
+{
+    preload = std::max (256, juce::roundToInt (preloadSeconds * kit.sampleRate));
+
     // Every hit's start, in one block
-    const int frameBytes = k->kit.frameBytes();
+    const int frameBytes = kit.frameBytes();
     size_t total = 0;
     int hitCount = 0;
 
-    for (auto& in : k->kit.instruments)
+    for (auto& in : kit.instruments)
     {
-        k->starts.emplace_back();
+        starts.emplace_back();
 
         for (auto& h : in.hits)
         {
-            k->starts.back().push_back (total);
-            total += (size_t) std::min (h.frames, k->preload) * (size_t) frameBytes;
+            starts.back().push_back (total);
+            total += (size_t) std::min (h.frames, preload) * (size_t) frameBytes;
             ++hitCount;
         }
     }
 
     try
     {
-        k->memory.setSize (std::max<size_t> (total, 1), false);
+        memory.setSize (std::max<size_t> (total, 1), false);
     }
     catch (const std::bad_alloc&)
     {
         error = "there isn't enough memory to load it";
-        return {};
+        return false;
     }
 
     int done = 0;
 
-    for (size_t i = 0; i < k->kit.instruments.size(); ++i)
+    for (size_t i = 0; i < kit.instruments.size(); ++i)
     {
-        const auto& in = k->kit.instruments[i];
+        const auto& in = kit.instruments[i];
 
         for (size_t h = 0; h < in.hits.size(); ++h)
         {
             if (shouldStop != nullptr && shouldStop())
             {
                 error = "stopped";
-                return {};
+                return false;
             }
 
-            const auto bytes = (size_t) std::min (in.hits[h].frames, k->preload) * (size_t) frameBytes;
-            std::memcpy (static_cast<juce::uint8*> (k->memory.getData()) + k->starts[i][h], k->mapped (in.hits[h], 0), bytes);
+            const auto bytes = (size_t) std::min (in.hits[h].frames, preload) * (size_t) frameBytes;
+            std::memcpy (static_cast<juce::uint8*> (memory.getData()) + starts[i][h], mapped (in.hits[h], 0), bytes);
 
             if (progress != nullptr && (++done % 16) == 0)
                 progress ((float) done / (float) std::max (1, hitCount));
@@ -263,7 +290,7 @@ std::unique_ptr<LoadedKit> LoadedKit::open (const juce::File& folder, double pre
     if (progress != nullptr)
         progress (1.0f);
 
-    return k;
+    return true;
 }
 
 } // namespace drums

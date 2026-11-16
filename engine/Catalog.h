@@ -44,6 +44,7 @@ struct Piece
     int edge = -1;                  // the articulation a click near its edge plays (a hi-hat opens, a snare's rim)
     float edgeFrom = 0.0f;          // ...from this far out (0..1)
     juce::String lightsWith;        // another piece this one lights up with (a ride's bell with the ride)
+    juce::StringArray knobs;        // a drum machine's section: the knobs drawn on it ("Level", "Tune")
 };
 
 struct KitDefinition
@@ -55,6 +56,11 @@ struct KitDefinition
     juce::int64 zipBytes = 0;
     juce::String md5;               // the zip's, as drumgizmo.org gives it
     juce::String kitFile;           // the kit file inside the zip
+
+    /** "808" or "909": one of Nightshift Drums' own drum machines, synthesised as it's chosen (always
+        here, nothing to download) and drawn as the machine, a section a drum. */
+    juce::String machine;
+    bool isMachine() const          { return machine.isNotEmpty(); }
 
     // The kit view
     juce::String picture;           // a BinaryData resource name; "" draws the kit instead

@@ -178,6 +178,346 @@ namespace
             g.drawLine (b.getX() + 4.0f, y, b.getRight() - 4.0f, y, 1.0f);
         }
     }
+
+    //==============================================================================
+    // The drum machines, drawn in the spirit of the classic boxes: a name band, a section a drum (its
+    // lamp, its name, its knobs) across the middle, sixteen step keys along the bottom. The sections are
+    // the pieces (Catalog.cpp places them); the rest is laid out here, in the same 2000 x 1116 space.
+
+    namespace face
+    {
+        constexpr float bodyX = 24.0f, bodyY = 20.0f, bodyW = 1952.0f, bodyH = 1076.0f, corner = 34.0f;
+        constexpr float bandBottom = 196.0f, seam = 800.0f;
+        constexpr float keysLeft = 60.0f, keysWidth = 1880.0f, keysTop = 862.0f, keyHeight = 118.0f, keyGap = 12.0f, groupGap = 30.0f;
+        constexpr float lampDrop = 42.0f, lampRadius = 11.0f, knobRadius = 34.0f, firstKnob = 166.0f, knobStep = 116.0f;
+
+        inline float keyWidth()             { return (keysWidth - 12.0f * keyGap - 3.0f * groupGap) / 16.0f; }
+
+        inline juce::Rectangle<float> key (int step)
+        {
+            const float x = keysLeft + (float) step * keyWidth() + (float) (step - step / 4) * keyGap + (float) (step / 4) * groupGap;
+            return { x, keysTop, keyWidth(), keyHeight };
+        }
+
+        inline juce::Point<float> stepLamp (int step)       { return { key (step).getCentreX(), keysTop - 24.0f }; }
+
+        inline juce::Point<float> sectionLamp (const Piece& p)
+        {
+            const auto r = p.shape.path().getBounds();
+            return { r.getCentreX(), r.getY() + lampDrop };
+        }
+    }
+
+    struct MachineLook
+    {
+        juce::Colour bodyTop, bodyBottom, rim, band, bandBottom, name, number, subtitle;
+        juce::Colour panel, panelEdge, label, knobLabel, skirt, skirtDark, knobTop, pointer;
+        juce::Colour lampOff, lampOn, stepNumber, key, keyEdge;
+        bool warm = false;      // the 808's keys and section caps run red to cream; the 909's are pale, marked in orange
+    };
+
+    MachineLook lookOf (const KitDefinition& def)
+    {
+        MachineLook l;
+
+        if (def.machine == "909")
+        {
+            // Brushed silver, a graphite band, orange marks, black knobs
+            l.bodyTop = juce::Colour (0xffdfddd7);  l.bodyBottom = juce::Colour (0xffb6b3ac);  l.rim = juce::Colour (0xff85827c);
+            l.band = juce::Colour (0xff2f3034);     l.bandBottom = juce::Colour (0xff222326);  l.name = juce::Colours::white;
+            l.number = juce::Colour (0xffff7d33);   l.subtitle = juce::Colour (0xffcbc8c2);
+            l.panel = juce::Colour (0xffd4d2cc);    l.panelEdge = juce::Colour (0xff97948d);   l.label = juce::Colour (0xff1f2023);
+            l.knobLabel = juce::Colour (0xff3b3c40); l.skirt = juce::Colour (0xff3a3b3f);      l.skirtDark = juce::Colour (0xff0e0f11);
+            l.knobTop = juce::Colour (0xff2a2b2f);  l.pointer = juce::Colour (0xfff4f4f1);
+            l.lampOff = juce::Colour (0xff5e221d);  l.lampOn = juce::Colour (0xffff3d2b);     l.stepNumber = juce::Colour (0xff2f3034);
+            l.key = juce::Colour (0xffeeede9);      l.keyEdge = juce::Colour (0xff86837d);
+            return l;
+        }
+
+        // Near-black, warm: cream-topped knobs, keys from red to cream
+        l.bodyTop = juce::Colour (0xff2c2926);  l.bodyBottom = juce::Colour (0xff161514);  l.rim = juce::Colour (0xff4c4741);
+        l.band = juce::Colour (0xff1f1d1b);     l.bandBottom = juce::Colour (0xff141312);  l.name = juce::Colour (0xfff4efe7);
+        l.number = theme::accent;               l.subtitle = juce::Colour (0xffb6aea2);
+        l.panel = juce::Colour (0xff25221f);    l.panelEdge = juce::Colour (0xff403b35);   l.label = juce::Colour (0xfff2e9da);
+        l.knobLabel = juce::Colour (0xffb3ab9f); l.skirt = juce::Colour (0xff3b3835);      l.skirtDark = juce::Colour (0xff121110);
+        l.knobTop = juce::Colour (0xffe8dec9);  l.pointer = juce::Colour (0xff221e1a);
+        l.lampOff = juce::Colour (0xff521c17);  l.lampOn = juce::Colour (0xffff4433);     l.stepNumber = juce::Colour (0xffaaa296);
+        l.warm = true;
+        return l;
+    }
+
+    /** The 808's run of colours across its keys and sections: red, orange, amber, cream. */
+    juce::Colour warmAt (float t)
+    {
+        const juce::Colour stops[] { juce::Colour (0xffc8372d), juce::Colour (0xffe3712b), juce::Colour (0xfff0b13d), juce::Colour (0xffede1c5) };
+        t = juce::jlimit (0.0f, 1.0f, t) * 3.0f;
+        const int i = std::min (2, (int) t);
+        return stops[i].interpolatedWith (stops[i + 1], t - (float) i);
+    }
+
+    /** A knob's turn (0..1) that looks set by hand, the same every time. */
+    float turnOf (int section, int knob)
+    {
+        const double v = std::sin ((section + 1) * 12.9898 + (knob + 1) * 78.233) * 43758.5453;
+        return 0.3f + 0.45f * (float) (v - std::floor (v));
+    }
+
+    void drawKnob (juce::Graphics& g, juce::Point<float> c, float r, float turn, const MachineLook& look)
+    {
+        g.setColour (juce::Colours::black.withAlpha (look.warm ? 0.55f : 0.3f));
+        g.fillEllipse (c.x - r + r * 0.06f, c.y - r + r * 0.14f, r * 2.0f, r * 2.0f);
+
+        juce::ColourGradient skirt (look.skirt, c.x, c.y - r, look.skirtDark, c.x, c.y + r, false);
+        g.setGradientFill (skirt);
+        g.fillEllipse (c.x - r, c.y - r, r * 2.0f, r * 2.0f);
+
+        // The skirt's grip (too fine to see on a small one)
+        g.setColour (juce::Colours::black.withAlpha (0.3f));
+
+        for (int i = 0; i < (r >= 8.0f ? 16 : 0); ++i)
+        {
+            const float a = juce::MathConstants<float>::twoPi * (float) i / 16.0f;
+            g.drawLine (c.x + std::sin (a) * r * 0.74f, c.y - std::cos (a) * r * 0.74f, c.x + std::sin (a) * r * 0.97f, c.y - std::cos (a) * r * 0.97f,
+                        std::max (0.6f, r * 0.03f));
+        }
+
+        const float t = r * 0.64f;
+        juce::ColourGradient top (look.knobTop.brighter (0.3f), c.x - t * 0.4f, c.y - t * 0.6f, look.knobTop.darker (0.25f), c.x + t * 0.5f, c.y + t * 0.8f, true);
+        g.setGradientFill (top);
+        g.fillEllipse (c.x - t, c.y - t, t * 2.0f, t * 2.0f);
+
+        const float a = juce::degreesToRadians (-135.0f + 270.0f * turn);
+        g.setColour (look.pointer);
+        g.drawLine (c.x + std::sin (a) * r * 0.18f, c.y - std::cos (a) * r * 0.18f, c.x + std::sin (a) * r * 0.9f, c.y - std::cos (a) * r * 0.9f,
+                    std::max (1.0f, r * 0.12f));
+    }
+
+    void drawLamp (juce::Graphics& g, juce::Point<float> c, float r, const MachineLook& look, float on)
+    {
+        g.setColour (juce::Colours::black.withAlpha (0.5f));
+        g.fillEllipse (c.x - r * 1.3f, c.y - r * 1.3f, r * 2.6f, r * 2.6f);
+
+        const auto colour = look.lampOff.interpolatedWith (look.lampOn, juce::jlimit (0.0f, 1.0f, on));
+        juce::ColourGradient lens (colour.brighter (0.3f + 0.5f * on), c.x - r * 0.3f, c.y - r * 0.4f, colour.darker (0.35f), c.x + r * 0.6f, c.y + r * 0.7f, true);
+        g.setGradientFill (lens);
+        g.fillEllipse (c.x - r, c.y - r, r * 2.0f, r * 2.0f);
+
+        if (on > 0.01f)
+        {
+            juce::ColourGradient glow (look.lampOn.withAlpha (0.5f * on), c.x, c.y, look.lampOn.withAlpha (0.0f), c.x + r * 4.5f, c.y, true);
+            g.setGradientFill (glow);
+            g.fillEllipse (c.x - r * 4.5f, c.y - r * 4.5f, r * 9.0f, r * 9.0f);
+        }
+    }
+
+    /** Words on the machine at `px` (picture space) or smaller down to `leastPx`, on one line or two,
+        whichever fits `box`. */
+    void drawWords (juce::Graphics& g, const juce::String& words, juce::Rectangle<float> box, float px, float leastPx, float s,
+                    bool bold, juce::Colour colour, juce::Justification just = juce::Justification::centredTop)
+    {
+        g.setColour (colour);
+        auto fits = [&] (const juce::String& line, float size) { return juce::GlyphArrangement::getStringWidth (font (size * s, bold), line) <= box.getWidth(); };
+
+        for (float size = px; size >= leastPx - 0.01f; size -= 1.0f)
+            if (fits (words, size))
+            {
+                g.setFont (font (size * s, bold));
+                g.drawText (words, box, just, false);
+                return;
+            }
+
+        // Two lines: the words split where both halves fit best
+        const auto parts = juce::StringArray::fromTokens (words, " ", "");
+
+        for (float size = px; size >= leastPx - 0.01f; size -= 1.0f)
+            for (int cut = 1; cut < parts.size(); ++cut)
+            {
+                juce::StringArray first, second;
+
+                for (int i = 0; i < parts.size(); ++i)
+                    (i < cut ? first : second).add (parts[i]);
+
+                const auto a = first.joinIntoString (" "), b = second.joinIntoString (" ");
+
+                if (fits (a, size) && fits (b, size))
+                {
+                    g.setFont (font (size * s, bold));
+                    const float line = size * s * 1.12f;
+                    g.drawText (a, box.withHeight (line), just, false);
+                    g.drawText (b, box.withTrimmedTop (line).withHeight (line), just, false);
+                    return;
+                }
+            }
+
+        g.setFont (font (leastPx * s, bold));
+        g.drawText (words, box, just, false);
+    }
+
+    void drawMachine (juce::Graphics& g, const KitDefinition& def, juce::Rectangle<float> area)
+    {
+        const float s = area.getWidth() / def.pictureWidth;
+        const bool words = s >= 0.3f;         // a thumbnail's too small to read: shapes only
+        const auto look = lookOf (def);
+        const auto toView = juce::AffineTransform::scale (s).translated (area.getX(), area.getY());
+        auto at = [&] (juce::Rectangle<float> r) { return r.transformedBy (toView); };
+        auto point = [&] (juce::Point<float> p) { return p.transformedBy (toView); };
+        const auto clip = g.getClipBounds().toFloat();
+
+        // The box, and its edge catching the light
+        const auto body = at ({ face::bodyX, face::bodyY, face::bodyW, face::bodyH });
+        juce::Path shell;
+        shell.addRoundedRectangle (body, face::corner * s);
+        g.setColour (juce::Colours::black.withAlpha (0.45f));
+        g.fillRoundedRectangle (body.translated (0.0f, 10.0f * s), face::corner * s);
+        juce::ColourGradient metal (look.bodyTop, body.getX(), body.getY(), look.bodyBottom, body.getX(), body.getBottom(), false);
+        g.setGradientFill (metal);
+        g.fillPath (shell);
+
+        {
+            juce::Graphics::ScopedSaveState state (g);
+            g.reduceClipRegion (shell);
+
+            // The name band, and the line of colour under it
+            const auto band = at ({ face::bodyX, face::bodyY, face::bodyW, face::bandBottom - face::bodyY });
+            juce::ColourGradient bandFill (look.band, band.getX(), band.getY(), look.bandBottom, band.getX(), band.getBottom(), false);
+            g.setGradientFill (bandFill);
+            g.fillRect (band);
+
+            const auto line = at ({ face::bodyX, face::bandBottom, face::bodyW, 7.0f });
+
+            if (look.warm)
+            {
+                juce::ColourGradient run (warmAt (0.0f), line.getX(), line.getY(), warmAt (1.0f), line.getRight(), line.getY(), false);
+                run.addColour (1.0 / 3.0, warmAt (1.0f / 3.0f));
+                run.addColour (2.0 / 3.0, warmAt (2.0f / 3.0f));
+                g.setGradientFill (run);
+            }
+            else
+            {
+                g.setColour (look.number);
+            }
+
+            g.fillRect (line);
+
+            // A seam between the sections and the steps
+            const auto seam = at ({ face::bodyX + 30.0f, face::seam, face::bodyW - 60.0f, 2.0f });
+            g.setColour (juce::Colours::black.withAlpha (look.warm ? 0.5f : 0.22f));
+            g.fillRect (seam);
+            g.setColour (juce::Colours::white.withAlpha (look.warm ? 0.05f : 0.35f));
+            g.fillRect (seam.translated (0.0f, 2.0f * s));
+        }
+
+        g.setColour (look.rim);
+        g.drawRoundedRectangle (body.reduced (1.0f * s), face::corner * s, std::max (1.0f, 2.5f * s));
+
+        // The name, and the two big knobs at the right of the band
+        if (words)
+        {
+            const auto nameBox = at ({ 80.0f, 44.0f, 1200.0f, 84.0f });
+            const auto nameFont = font (78.0f * s, true);
+            const juce::String first ("NIGHTSHIFT ");
+            g.setFont (nameFont);
+            g.setColour (look.name);
+            g.drawText (first, nameBox, juce::Justification::centredLeft, false);
+            g.setColour (look.number);
+            g.drawText (def.machine, nameBox.withTrimmedLeft (juce::GlyphArrangement::getStringWidth (nameFont, first)), juce::Justification::centredLeft, false);
+            drawWords (g, "Drum machine", { nameBox.getX(), at ({ 0.0f, 132.0f, 1.0f, 1.0f }).getY(), 600.0f * s, 40.0f * s }, 30.0f, 30.0f, s,
+                       false, look.subtitle, juce::Justification::centredLeft);
+        }
+
+        for (auto [x, name] : { std::pair (1676.0f, "Tempo"), std::pair (1842.0f, "Volume") })
+        {
+            drawKnob (g, point ({ x, 96.0f }), 42.0f * s, name[0] == 'T' ? 0.5f : 0.68f, look);
+
+            if (words)
+                drawWords (g, name, at ({ x - 75.0f, 144.0f, 150.0f, 36.0f }), 26.0f, 26.0f, s, false, look.subtitle);
+        }
+
+        // A section a drum, every name the same size: the biggest that all of them fit on a line at
+        const int count = (int) def.pieces.size();
+        float namePx = 30.0f;
+
+        if (words)
+            for (; namePx > 26.0f; namePx -= 0.5f)
+            {
+                bool all = true;
+
+                for (auto& p : def.pieces)
+                    all = all && juce::GlyphArrangement::getStringWidth (font (namePx * s, true), p.name)
+                                     <= (p.shape.path().getBounds().getWidth() - 8.0f) * s;
+
+                if (all)
+                    break;
+            }
+
+        for (int i = 0; i < count; ++i)
+        {
+            const auto& p = def.pieces[(size_t) i];
+            const auto r = p.shape.path().getBounds();
+            const auto v = at (r);
+
+            if (! v.expanded (60.0f * s).intersects (clip))
+                continue;
+
+            g.setColour (look.panel);
+            g.fillRoundedRectangle (v, 8.0f * s);
+            g.setColour (look.panelEdge);
+            g.drawRoundedRectangle (v, 8.0f * s, std::max (1.0f, 2.0f * s));
+
+            // Its cap: the run of colours across the 808, orange on the 909
+            g.setColour (look.warm ? warmAt ((float) i / (float) std::max (1, count - 1)) : look.number);
+            g.fillRoundedRectangle (at (r.withHeight (12.0f)), 4.0f * s);
+
+            drawLamp (g, point (face::sectionLamp (p)), face::lampRadius * s, look, 0.0f);
+
+            if (words)
+                drawWords (g, p.name, at ({ r.getX() + 4.0f, r.getY() + 62.0f, r.getWidth() - 8.0f, 72.0f }), namePx, namePx, s, true, look.label);
+
+            for (int k = 0; k < p.knobs.size(); ++k)
+            {
+                const float y = r.getY() + face::firstKnob + (float) k * face::knobStep;
+                drawKnob (g, point ({ r.getCentreX(), y }), face::knobRadius * s, turnOf (i, k), look);
+
+                if (words)
+                    drawWords (g, p.knobs[k], at ({ r.getX() + 2.0f, y + face::knobRadius + 8.0f, r.getWidth() - 4.0f, 34.0f }), 26.0f, 25.5f, s,
+                               false, look.knobLabel);
+            }
+        }
+
+        // Sixteen steps, in fours
+        for (int step = 0; step < 16; ++step)
+        {
+            const auto k = face::key (step);
+            const auto v = at (k);
+
+            if (! v.expanded (60.0f * s).intersects (clip))
+                continue;
+
+            drawLamp (g, point (face::stepLamp (step)), 9.0f * s, look, 0.0f);
+
+            const auto colour = look.warm ? warmAt ((float) step / 15.0f) : look.key;
+            g.setColour (juce::Colours::black.withAlpha (0.45f));
+            g.fillRoundedRectangle (v.translated (0.0f, 5.0f * s), 8.0f * s);
+            juce::ColourGradient plastic (colour.brighter (0.16f), v.getX(), v.getY(), colour.darker (0.22f), v.getX(), v.getBottom(), false);
+            g.setGradientFill (plastic);
+            g.fillRoundedRectangle (v, 8.0f * s);
+            g.setColour (look.warm ? colour.darker (0.7f) : look.keyEdge);
+            g.drawRoundedRectangle (v, 8.0f * s, std::max (1.0f, 2.0f * s));
+            g.setColour (juce::Colours::white.withAlpha (0.24f));
+            g.fillRoundedRectangle (v.reduced (8.0f * s).withHeight (v.getHeight() * 0.16f), 4.0f * s);
+
+            if (words)
+                drawWords (g, juce::String (step + 1), at ({ k.getX(), k.getBottom() + 10.0f, k.getWidth(), 36.0f }), 26.0f, 26.0f, s, false, look.stepNumber);
+
+            // The 909's fours, marked in orange under their numbers
+            if (! look.warm && step % 4 == 0)
+            {
+                const auto last = face::key (step + 3);
+                g.setColour (look.number);
+                g.fillRect (at ({ k.getX(), k.getBottom() + 52.0f, last.getRight() - k.getX(), 6.0f }));
+            }
+        }
+    }
 }
 
 //==============================================================================
@@ -194,6 +534,12 @@ juce::Image kitPhoto (const KitDefinition& def)
 void drawKitPicture (juce::Graphics& g, const KitDefinition& def, juce::Rectangle<float> area)
 {
     const float scale = area.getWidth() / def.pictureWidth;
+
+    if (def.isMachine())
+    {
+        drawMachine (g, def, area);
+        return;
+    }
 
     if (const auto photo = kitPhoto (def); photo.isValid())
     {
@@ -433,29 +779,72 @@ void KitView::timerCallback()
     const int n = processor.getEngine().popStruck (struck, 64);
     bool changed = false;
 
+    const bool machine = def != nullptr && def->isMachine();
+    dirty.assign (flash.size(), false);
+
     for (int i = 0; i < n; ++i)
         if (def != nullptr && juce::isPositiveAndBelow (struck[i].piece, (int) flash.size()))
         {
             const float strength = 0.35f + 0.65f * struck[i].velocity;
             flash[(size_t) struck[i].piece] = std::max (flash[(size_t) struck[i].piece], strength);
+            dirty[(size_t) struck[i].piece] = true;
             const auto& with = def->pieces[(size_t) struck[i].piece].lightsWith;
 
             for (size_t p = 0; p < def->pieces.size(); ++p)
                 if (with.isNotEmpty() && def->pieces[p].id == with)
+                {
                     flash[p] = std::max (flash[p], strength * 0.8f);
+                    dirty[p] = true;
+                }
 
             changed = true;
         }
 
-    for (auto& f : flash)
-        if (f > 0.0f)
+    for (size_t i = 0; i < flash.size(); ++i)
+        if (flash[i] > 0.0f)
         {
-            f = f < 0.02f ? 0.0f : f * 0.8f;
+            flash[i] = flash[i] < 0.02f ? 0.0f : flash[i] * 0.8f;
+            dirty[i] = true;
             changed = true;
         }
 
     const bool waiting = processor.getKitState() == DrumsProcessor::KitState::loading;
     getButton.setVisible (processor.getKitState() == DrumsProcessor::KitState::notInstalled);
+
+    // Loaded, or failed: all of it again, without the message over it
+    if (processor.getKitState() != shownState)
+    {
+        shownState = processor.getKitState();
+        repaint();
+    }
+
+    if (machine && ! waiting)
+    {
+        // A drum machine's face is a lot to draw: only the sections whose lamps changed, and the step
+        // lamps as the music moves along
+        for (size_t i = 0; i < dirty.size(); ++i)
+            if (dirty[i])
+                repaint (pathOf ((int) i).getBounds().expanded (60.0f * scale).getSmallestIntegerContainer());
+
+        int step = -1;
+
+        if (const double beat = processor.getRunningBeat(); beat >= 0.0)
+            step = (int) std::fmod (std::floor (beat * 4.0), 16.0);
+
+        if (step != litStep)
+        {
+            for (int s : { litStep, step })
+                if (s >= 0)
+                {
+                    const auto c = juce::Point<float> (area.getX(), area.getY()) + face::stepLamp (s) * scale;
+                    repaint (juce::Rectangle<float> (120.0f * scale, 120.0f * scale).withCentre (c).getSmallestIntegerContainer());
+                }
+
+            litStep = step;
+        }
+
+        return;
+    }
 
     if (changed || waiting)
         repaint();
@@ -493,6 +882,10 @@ void KitView::drawKit (juce::Graphics& g)
 
 void KitView::drawLights (juce::Graphics& g)
 {
+    const bool machine = def != nullptr && def->isMachine();
+    const auto look = machine ? lookOf (*def) : MachineLook {};
+    const auto toView = juce::AffineTransform::scale (scale).translated (area.getX(), area.getY());
+
     for (size_t i = 0; i < flash.size(); ++i)
     {
         const float f = flash[i];
@@ -503,7 +896,17 @@ void KitView::drawLights (juce::Graphics& g)
 
         const auto path = pathOf ((int) i);
 
-        if (picture.isValid() && lit.isValid())
+        if (machine)
+        {
+            if (f > 0.0f)
+            {
+                // Its lamp lit, and the section warm under it
+                g.setColour (look.lampOn.withAlpha (0.12f * f));
+                g.fillPath (path);
+                drawLamp (g, face::sectionLamp (def->pieces[i]).transformedBy (toView), face::lampRadius * scale, look, f);
+            }
+        }
+        else if (picture.isValid() && lit.isValid())
         {
             juce::Graphics::ScopedSaveState state (g);
             g.reduceClipRegion (path);
@@ -519,12 +922,16 @@ void KitView::drawLights (juce::Graphics& g)
             g.fillPath (path);
         }
 
-        if (hover || f > 0.05f)
+        if (hover || (f > 0.05f && ! machine))
         {
             g.setColour (accent.withAlpha (hover ? 0.9f : 0.7f * f));
             g.strokePath (path, juce::PathStrokeType (hover ? 1.6f : 2.0f));
         }
     }
+
+    // The step the music's on
+    if (machine && litStep >= 0)
+        drawLamp (g, face::stepLamp (litStep).transformedBy (toView), 9.0f * scale, look, 1.0f);
 
     // What's under the mouse, beside it
     if (hovered >= 0 && def != nullptr && processor.getKitState() == DrumsProcessor::KitState::ready)
@@ -569,8 +976,16 @@ void KitView::drawState (juce::Graphics& g)
             break;
 
         case DrumsProcessor::KitState::loading:
-            title = "Loading the " + name + " kit";
-            detail = juce::String (juce::roundToInt (processor.getLoadProgress() * 100.0f)) + " %: every hit's first moments into memory, the rest plays from disk";
+            if (def != nullptr && def->isMachine())
+            {
+                title = "Making the " + name;
+                detail = juce::String (juce::roundToInt (processor.getLoadProgress() * 100.0f)) + " %: every drum synthesised, three layers each, nothing to download";
+            }
+            else
+            {
+                title = "Loading the " + name + " kit";
+                detail = juce::String (juce::roundToInt (processor.getLoadProgress() * 100.0f)) + " %: every hit's first moments into memory, the rest plays from disk";
+            }
             break;
 
         case DrumsProcessor::KitState::failed:

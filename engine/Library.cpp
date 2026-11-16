@@ -31,6 +31,10 @@ Library::~Library()
 //==============================================================================
 Library::Status Library::getStatus (const juce::String& kitId) const
 {
+    // A drum machine is made as it's chosen: always here
+    if (const auto* def = findKit (kitId); def != nullptr && def->isMachine())
+        return Status { State::ready, 1.0f };
+
     const juce::ScopedLock sl (lock);
     auto it = statuses.find (kitId);
     return it != statuses.end() ? it->second : Status {};
@@ -72,6 +76,9 @@ void Library::scan()
 
     for (auto& def : catalog())
     {
+        if (def.isMachine())
+            continue;
+
         juce::String error;
         const bool ready = KitIndex::load (kitFolderFor (folder, def), error).has_value();
         const juce::ScopedLock sl (lock);
@@ -108,7 +115,7 @@ void Library::set (const juce::String& kitId, std::function<void (Status&)> chan
 //==============================================================================
 void Library::install (const juce::String& kitId)
 {
-    if (findKit (kitId) == nullptr)
+    if (const auto* def = findKit (kitId); def == nullptr || def->isMachine())
         return;
 
     {
@@ -145,6 +152,9 @@ void Library::cancel (const juce::String& kitId)
 
 bool Library::remove (const juce::String& kitId)
 {
+    if (const auto* def = findKit (kitId); def == nullptr || def->isMachine())
+        return false;
+
     {
         const juce::ScopedLock sl (lock);
 

@@ -46,6 +46,10 @@ struct Instrument
     juce::String group;             // instruments in a group stop each other's ringing (the hi-hat's)
     std::vector<bool> own;          // per mic: one of the instrument's own (main) mics; the others only bleed
     std::vector<Hit> hits;          // softest first
+
+    /** A drum machine's: its hits are velocity layers, each in a few takes (hits of the same level).
+        Velocity picks the layer and the takes take turns, never another layer's hit. */
+    bool layered = false;
 };
 
 struct KitIndex
@@ -104,6 +108,10 @@ public:
     static std::unique_ptr<LoadedKit> open (const juce::File& folder, double preloadSeconds, juce::String& error,
                                             std::function<bool()> shouldStop = nullptr, std::function<void (float)> progress = nullptr);
 
+    /** A kit made in memory (a drum machine, synthesised): `samples` laid out as samples.bin is.
+        It plays exactly as a kit from disk does; there's just no disk. */
+    static std::unique_ptr<LoadedKit> fromMemory (KitIndex, juce::MemoryBlock samples, double preloadSeconds, juce::String& error);
+
     const KitIndex& index() const noexcept                  { return kit; }
     const juce::File& folder() const noexcept               { return dir; }
     int preloadFrames() const noexcept                      { return preload; }
@@ -119,11 +127,11 @@ public:
         streamer (or an offline render) does. */
     const juce::uint8* mapped (const Hit& hit, int frame) const noexcept
     {
-        return static_cast<const juce::uint8*> (map->getData()) + hit.offset + (juce::int64) frame * kit.frameBytes();
+        return base + hit.offset + (juce::int64) frame * kit.frameBytes();
     }
 
     /** The mapped file from its start (the streamer's). */
-    const juce::uint8* data() const noexcept                { return static_cast<const juce::uint8*> (map->getData()); }
+    const juce::uint8* data() const noexcept                { return base; }
 
 private:
     LoadedKit() = default;
@@ -132,8 +140,12 @@ private:
     juce::File dir;
     int preload = 0;
     std::unique_ptr<juce::MemoryMappedFile> map;
+    juce::MemoryBlock samplesInMemory;            // a kit made in memory: its samples.bin
+    const juce::uint8* base = nullptr;            // the samples, mapped or in memory
     juce::MemoryBlock memory;
     std::vector<std::vector<size_t>> starts;      // per instrument, per hit: where its preload starts in `memory`
+
+    bool preloadHits (double preloadSeconds, juce::String& error, std::function<bool()> shouldStop, std::function<void (float)> progress);
 
     JUCE_DECLARE_NON_COPYABLE (LoadedKit)
 };

@@ -5,6 +5,7 @@
 #include "TestKit.h"
 #include "engine/Importer.h"
 #include "engine/Engine.h"
+#include "engine/Machines.h"
 #include "engine/Mixer.h"
 #include "engine/Resampler.h"
 #include "groove/Grooves.h"
@@ -615,7 +616,7 @@ void testLibrary (Suite& s)
 
 void testCatalog (Suite& s)
 {
-    if (! s.wants ("catalog: the three kits"))
+    if (! s.wants ("catalog: every kit"))
         return;
 
     for (auto& def : catalog())
@@ -709,7 +710,7 @@ void testRealKits (Suite& s)
 
     for (auto& def : catalog())
     {
-        if (def.id == "testkit")
+        if (def.id == "testkit" || def.isMachine())     // the drum machines have tests of their own
             continue;
 
         const auto folder = kitFolderFor (defaultKitsFolder(), def);
@@ -783,6 +784,203 @@ void testRealKits (Suite& s)
     }
 }
 
+/** The drum machines: made in memory, every section playing, velocity picking the layer where NightShift's
+    does, the takes in turn, the hi-hats stopping each other, and (where NightShift has written its own
+    machines on this computer) the very sounds NightShift plays. */
+void testMachines (Suite& s)
+{
+    if (! s.wants ("machines: the Nightshift 808 and 909"))
+        return;
+
+    for (auto* id : { "nightshift808", "nightshift909" })
+    {
+        const auto* def = findKit (id);
+
+        if (def == nullptr || ! def->isMachine())
+        {
+            s.check (false, juce::String (id) + " is in the catalog, as a drum machine");
+            continue;
+        }
+
+        juce::String error;
+        const double started = juce::Time::getMillisecondCounterHiRes();
+        std::shared_ptr<LoadedKit> kit (machines::build (*def, Engine::preloadSeconds, error).release());
+        const double took = juce::Time::getMillisecondCounterHiRes() - started;
+
+        if (kit == nullptr)
+        {
+            s.check (false, def->name + " is made (" + error + ")");
+            continue;
+        }
+
+        const auto& index = kit->index();
+        bool layered = index.mics.size() == 1;
+
+        for (auto& in : index.instruments)
+            layered = layered && in.layered && (int) in.hits.size() == machines::layers * machines::takes;
+
+        s.check (layered && took < 5000.0,
+                 def->name + ": " + juce::String ((int) index.instruments.size()) + " drums, 3 layers of 2 takes each, made in "
+                     + juce::String (took, 0) + " ms (" + juce::File::descriptionOfSizeInBytes (index.dataBytes) + " in memory)");
+
+        Engine e;
+        e.setKit (kit, def, NoteMap::build (*def, index, false));
+        e.beginBlock();
+        e.setStreaming (false);
+        e.setSeed (5);
+        juce::AudioBuffer<float> out (Engine::maxMics, 24000);
+
+        auto render = [&] (int from, int count)
+        {
+            float* dest[Engine::maxMics];
+
+            for (int m = 0; m < Engine::maxMics; ++m)
+                dest[m] = out.getWritePointer (m, from);
+
+            e.render (dest, count);
+        };
+
+        auto play = [&] (int note, float velocity)
+        {
+            e.stopAll (true);
+            out.clear();
+            e.noteOn (note, velocity);
+            render (0, 9600);
+            return out.getMagnitude (0, 0, 9600);
+        };
+
+        // Every section, on every note it answers
+        juce::StringArray silent;
+        int notes = 0;
+
+        for (auto& piece : def->pieces)
+            for (auto& a : piece.articulations)
+                for (int note : a.notes)
+                {
+                    ++notes;
+
+                    if (play (note, 0.9f) < 1.0e-4f)
+                        silent.add (piece.name + " (" + juce::String (note) + ")");
+                }
+
+        s.check (silent.isEmpty(), def->name + ": all " + juce::String ((int) def->pieces.size()) + " sections play, on all " + juce::String (notes)
+                                       + " of their notes" + (silent.isEmpty() ? juce::String() : "; silent: " + silent.joinIntoString (", ")));
+
+        // Velocity picks the layer (NightShift's: 1-54, 55-100, 101-127), and the takes take turns
+        const int kick = index.indexOf ("kick");
+        juce::String heard;
+        bool rightLayers = kick >= 0;
+
+        for (auto [velocity, layer] : { std::pair (1, 0), std::pair (54, 0), std::pair (55, 1), std::pair (100, 1), std::pair (101, 2), std::pair (127, 2) })
+        {
+            play (36, (float) velocity / 127.0f);
+            const int got = e.lastHitOf (kick) / machines::takes;
+            rightLayers = rightLayers && got == layer;
+            heard << velocity << " plays layer " << (got + 1) << ", ";
+        }
+
+        int turns[4] {};
+
+        for (auto& t : turns)
+        {
+            play (36, 1.0f);
+            t = e.lastHitOf (kick);
+        }
+
+        const bool alternate = turns[0] != turns[1] && turns[0] == turns[2] && turns[1] == turns[3] && turns[0] / machines::takes == 2
+                               && turns[1] / machines::takes == 2;
+        s.check (rightLayers && alternate, def->name + ": velocity " + heard + "and its two takes take turns");
+
+        // At NightShift's levels: its kick peaking 7 dB under full scale at its hardest
+        auto peakDb = [&] (const Hit& h)
+        {
+            float peak = 0.0f;
+
+            for (int f = 0; f < h.frames; ++f)
+                peak = std::max (peak, std::abs (storedAt (kit->mapped (h, f)) * h.scale));
+
+            return juce::Decibels::gainToDecibels (peak);
+        };
+
+        const auto& kickHits = index.instruments[(size_t) std::max (0, kick)].hits;
+        const float hardest = peakDb (kickHits.back()), softest = peakDb (kickHits.front());
+        s.check (std::abs (hardest + 7.0f) < 0.01f && std::abs (softest - (-7.0f + machines::layerLevels[0])) < 0.01f,
+                 def->name + ": the kick peaks at " + juce::String (hardest, 2) + " dBFS at its hardest, as in NightShift, "
+                     + juce::String (softest, 2) + " at its softest layer");
+
+        // A closed hi-hat stops an open one ringing
+        auto openTail = [&] (bool close)
+        {
+            e.stopAll (true);
+            out.clear();
+            e.noteOn (46, 0.9f);
+            render (0, 4800);
+
+            if (close)
+                e.noteOn (42, 0.9f);
+
+            render (4800, 19200);
+            return out.getMagnitude (0, 19200, 4800);       // 0.4 to 0.5 s: the open hat's still ringing, the closed one's done
+        };
+
+        const float ringing = openTail (false), stopped = openTail (true);
+        s.check (ringing > 1.0e-3f && stopped < ringing * 0.01f,
+                 def->name + ": a closed hi-hat stops an open one (" + juce::String (juce::Decibels::gainToDecibels (stopped / std::max (1.0e-9f, ringing)), 0)
+                     + " dB of it left)");
+
+        // NightShift's own, where it has written them: every hit the same
+        juce::File theirs;
+
+        for (auto base : { juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("Nightshift"),
+                           juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("Application Support").getChildFile ("Nightshift") })
+            if (const auto folder = base.getChildFile ("Kits").getChildFile ("NS_" + def->machine).getChildFile ("samples"); folder.isDirectory())
+                theirs = folder;
+
+        if (theirs == juce::File())
+        {
+            std::cout << "SKIP  NightShift's own " << def->machine << " isn't on this computer to compare with" << std::endl;
+            continue;
+        }
+
+        juce::AudioFormatManager formats;
+        formats.registerBasicFormats();
+        double worst = 0.0;
+        int compared = 0;
+        juce::StringArray unlike;
+
+        for (auto& in : index.instruments)
+            for (int l = 0; l < machines::layers; ++l)
+                for (int t = 0; t < machines::takes; ++t)
+                {
+                    const auto& h = in.hits[(size_t) (l * machines::takes + t)];
+                    const auto file = theirs.getChildFile (in.name + "_" + juce::String (l + 1) + juce::String::charToString ((juce::juce_wchar) ('a' + t)) + ".wav");
+                    std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file));
+
+                    if (reader == nullptr || (int) reader->lengthInSamples != h.frames)
+                    {
+                        unlike.add (file.getFileName());
+                        continue;
+                    }
+
+                    juce::AudioBuffer<float> wav (1, h.frames);
+                    reader->read (&wav, 0, h.frames, 0, true, false);
+
+                    // Ours is theirs at its layer's level
+                    const float gain = juce::Decibels::decibelsToGain (machines::layerLevels[l]);
+                    const float top = std::max (1.0e-9f, wav.getMagnitude (0, 0, h.frames) * gain);
+
+                    for (int f = 0; f < h.frames; ++f)
+                        worst = std::max (worst, (double) std::abs (storedAt (kit->mapped (h, f)) * h.scale - wav.getSample (0, f) * gain) / top);
+
+                    ++compared;
+                }
+
+        s.check (unlike.isEmpty() && compared > 0 && worst < 1.0e-5,
+                 def->name + ": all " + juce::String (compared) + " of its hits are NightShift's own, sample for sample (worst "
+                     + juce::String (worst, 8) + " of the peak)" + (unlike.isEmpty() ? juce::String() : "; not the same: " + unlike.joinIntoString (", ")));
+    }
+}
+
 //==============================================================================
 int runTests (const juce::String& filter)
 {
@@ -796,6 +994,7 @@ int runTests (const juce::String& filter)
     testCatalog (s);
     testGrooves (s);
     testRealKits (s);
+    testMachines (s);
 
     std::cout << "\n" << s.passed << " passed, " << s.failed << " failed" << std::endl;
     std::cout << (s.failed == 0 ? "ALL PASSED" : "SOME FAILED") << std::endl;
@@ -838,7 +1037,18 @@ int info (const juce::StringArray& args)
         return 1;
 
     juce::String error;
-    auto k = KitIndex::load (kitFolderFor (kits, *def), error);
+    std::optional<KitIndex> k;
+
+    if (def->isMachine())
+    {
+        // A drum machine: made here, as the plugin makes it
+        if (const auto made = machines::build (*def, 0.01, error))
+            k = made->index();
+    }
+    else
+    {
+        k = KitIndex::load (kitFolderFor (kits, *def), error);
+    }
 
     if (! k.has_value())
     {
@@ -872,7 +1082,7 @@ int info (const juce::StringArray& args)
     std::cout << hits << " hits, " << juce::String (frames / k->sampleRate / 60.0, 1) << " minutes of recording" << std::endl;
 
     // Where the overheads and room hear each instrument: right minus left, in dB, on its hardest hit's first 300 ms
-    if (args.contains ("--balance"))
+    if (args.contains ("--balance") && ! def->isMachine())
     {
         juce::String error2;
         auto loaded = LoadedKit::open (kitFolderFor (kits, *def), 0.01, error2);
@@ -1194,7 +1404,14 @@ int snapshot (const juce::StringArray& args)
 
         if (args.contains ("--groove"))
             inner->writeGroove (after (args, "--groove"));
+
+        if (args.contains ("--scrolled"))
+            inner->scrollKitsToEnd();
     }
+
+    // The groove player auditioning what the drummer wrote (a drum machine's step lamps follow it)
+    if (args.contains ("--play"))
+        p.setGroovePlaying (true);
 
     editor->setVisible (true);
 

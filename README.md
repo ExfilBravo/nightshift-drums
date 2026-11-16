@@ -4,16 +4,18 @@
 [NightShift releases page](https://github.com/michaeldedmondson-design/nightshift/releases/latest).
 Free software under the GNU GPL v3 or later ([LICENSE](LICENSE)).
 
-A multi-mic acoustic drum plugin (VST3 on Windows; VST3, AU and a standalone app on a Mac) in the
+A multi-mic drum plugin (VST3 on Windows; VST3, AU and a standalone app on a Mac) in the
 Nightshift family, built on JUCE. It plays the three free studio kits from
-[DrumGizmo.org](https://drumgizmo.org) with every microphone and every recorded hit, the way
-Superior Drummer plays its kits:
+[DrumGizmo.org](https://drumgizmo.org) with every microphone and every recorded hit, as the big
+commercial drum samplers play theirs, and Nightshift's own two drum machines:
 
 | Kit | What it is | Download |
 | --- | --- | --- |
 | **Crocell** | the Danish metal band Crocell's kit: double pedal, 2 rack + 2 floor toms, 3 crashes, 2 chinas, 2 splashes; 15 mics | 5.3 GB |
-| **DRS** | a handmade DRS Drums kit with Paiste cymbals, recorded with sticks and with brushes; 13 mics | 2.6 GB |
-| **Muldjord** | Lars Muldjord's Tama Superstar: 2 kicks, 4 toms, 2 rides; 16 mics | 2.4 GB |
+| **DRS** | a handmade DRS Drums kit, recorded with sticks and with brushes; 13 mics | 2.6 GB |
+| **Muldjord** | Lars Muldjord's own kit: 2 kicks, 4 toms, 2 rides; 16 mics | 2.4 GB |
+| **Nightshift 808** | NightShift's 808-style drum machine, synthesised: 14 drums | built in |
+| **Nightshift 909** | NightShift's 909-style drum machine, synthesised: 16 drums | built in |
 
 - **Every mic, every hit.** Each hit sounds on all of the kit's mics at once (close mics, overheads,
   room), with the real bleed between them. A note picks one of the instrument's recorded hits by how
@@ -28,6 +30,13 @@ Superior Drummer plays its kits:
   lights when it plays and plays when clicked:
   the hi-hat opens at its edge, the snare's rim is a rimshot, the ride's bell is its bell;
   right-click for every articulation. Shift-click for a softer hit.
+- **Two drum machines.** The Nightshift 808 and 909 are NightShift's own synthesised drum machines
+  (its code, copied in `engine/Machines.cpp`; no samples): each drum in three velocity layers that
+  hit harder in tone as well as level, two takes a layer, made in memory in a moment when the kit is
+  chosen. Their Kit page is the machine, drawn: a section a drum with its knobs, whose lamp lights
+  when it plays (click it to play it), and sixteen step keys whose lamps run with the host's beat.
+  They come out of one mixer strip, "Direct". In the spirit of the classic boxes, not a copy of any:
+  no maker's name, lettering or layout.
 - **Hi-hat.** Closed, open, half open, pedal; a hit stops the hi-hat ringing. With an electronic
   kit's hi-hat pedal (MIDI CC 4), the hi-hat note plays closed, half open or open as the pedal is.
   Aftertouch on a cymbal's note chokes it.
@@ -35,9 +44,10 @@ Superior Drummer plays its kits:
   for a style or for words ("funk, busy hats, 96 bpm"): sections, fills and its feel. It plays on the
   kit in time with the host, and drags into the song as MIDI. Nothing goes to the internet.
 - **General MIDI notes** for the main drums (36 kick, 38 snare, 42/44/46 hi-hat, 49/57 crashes,
-  51/53 ride, 50/48/47/45/43/41 toms), so NightShift's drummer and any GM drum part play the right
-  drums. The extras (stopped crashes, a second china, brushes' sweep...) are on notes General MIDI
-  leaves free; hover a piece on the Kit page to see its note.
+  51/53 ride, 50/48/47/45/43/41 toms; on the machines also 37 rim, 39 clap, 56 cowbell, 70 maracas,
+  75 claves), so NightShift's drummer and any GM drum part play the right drums. The extras (stopped
+  crashes, a second china, brushes' sweep...) are on notes General MIDI leaves free; hover a piece on
+  the Kit page to see its note.
 
 ## Getting the kits
 
@@ -62,7 +72,7 @@ build.cmd Release
 Builds the plugin, its standalone app and `drumstool`, and copies the `.vst3` to
 `%LOCALAPPDATA%\Programs\Common\VST3` (beside the Lofi and Bass plugins). `install.cmd` also puts the
 standalone app in `%LOCALAPPDATA%\Programs\Nightshift Drums` with a Start menu shortcut (it plays from a
-MIDI keyboard or e-kit through the MiniFuse's ASIO driver: its Options menu). `build_clang.cmd` builds
+MIDI keyboard or e-kit through an audio interface's ASIO driver: its Options menu). `build_clang.cmd` builds
 `drumstool` with clang-cl, the compiler family Apple's Xcode uses; `mac/build.sh` is the Mac build.
 
 ## Checking it
@@ -73,7 +83,7 @@ drumstool --import <zip> <crocell|drs|muldjord> <folder>
 drumstool --info <kits folder> <kit>               # mics, default mix, hits
 drumstool --render <kits folder> <kit> out.wav --groove "rock" [--rate 44100] [--bpm 110] [--seconds 16]
 drumstool --stress <kits folder> <kit> [--seconds 20] [--block 128]
-drumstool --snapshot out.png --kits <folder> --kit <kit> --page kit|mixer|grooves|kits [--groove "..."] [--hit 36,38] [--textaudit]
+drumstool --snapshot out.png --kits <folder> --kit <kit> --page kit|mixer|grooves|kits [--groove "..."] [--hit 36,38] [--play] [--scrolled] [--textaudit]
 drumstool --vst3 "%LOCALAPPDATA%\Programs\Common\VST3\Nightshift Drums.vst3"
 ```
 
@@ -84,7 +94,9 @@ The tests make a small DrumGizmo kit of their own and check the importer (every 
 24-bit step), the engine (a note plays its hit sample for sample; velocity, no repeats, bleed, the
 hi-hat choke, streaming identical to reading the file), the resampler, the plugin (notes on their
 sample, the same output at any block size and host rate, the mixer, sessions), the kit library, the
-three kits' note maps and the grooves. `--stress` plays blast beats with every cymbal in real time
+kits' note maps, the grooves, and the drum machines (every section plays, velocity picks the layer
+where NightShift's does, the takes take turns, the hats choke, and every hit is NightShift's own,
+sample for sample, when NightShift has written its machines on the computer). `--stress` plays blast beats with every cymbal in real time
 and reports the CPU and any frame the disk delivered late (there must be none).
 
 `--snapshot --textaudit` lists any text that's under 15 px, squeezed, cut short, clipped or faint
@@ -92,9 +104,10 @@ and reports the CPU and any frame the disk delivered late (there must be none).
 
 ## Layout
 
-- `engine/` – the kit format (`KitFile`), the DrumGizmo importer, the three kits' definitions
-  (`Catalog`: pieces, articulations, notes, where each piece is in its picture), the engine and its
-  streamer, the resampler, the mixer, and the library (downloads).
+- `engine/` – the kit format (`KitFile`), the DrumGizmo importer, the kits' definitions (`Catalog`:
+  pieces, articulations, notes, where each piece is in its picture), the drum machines (`Machines`,
+  `DrumSynth`: NightShift's synthesis, copied as it is from NightShift's `src/audio`), the engine and
+  its streamer, the resampler, the mixer, and the library (downloads).
 - `groove/` – NightShift's offline drummer (`OfflineDrummer`, `Request`: copied as they are from
   NightShift's `src/ai`) and grooves as MIDI (`Grooves`).
 - `plugin/` – the processor, the window and its pages, the kit view.
@@ -108,4 +121,5 @@ Built on JUCE (AGPLv3 / commercial). The kits are DrumGizmo.org's under Creative
 Attribution 4.0: CrocellKit 1.1 (sampled by Lars Muldjord; kit set up by Crocell, mics by JBOSound),
 DRSKit 2.1 (DrumGizmo.org with DRS Drums; sampled by Deva and Lars Muldjord), MuldjordKit 3 (Lars
 Muldjord). "Drum samples provided by DrumGizmo.org." The pictures of the three kits were generated
-with an image AI for Nightshift Drums, from descriptions of the real kits.
+with an image AI for Nightshift Drums, from descriptions of the real kits. The Nightshift 808 and
+909 are synthesised (NightShift's own code, GPL v3 or later) and drawn by Nightshift Drums.

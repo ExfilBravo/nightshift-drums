@@ -86,6 +86,10 @@ public:
     float getGroovePosition() const                     { return groovePosition.load(); }   // 0..1 through the loop
     double getHostBpm() const                           { return hostBpm.load(); }
 
+    /** Where the music is, in beats (the host's while it plays, else the groove player's), or -1 when
+        nothing is playing: what a drum machine's step lights follow. */
+    double getRunningBeat() const                       { return runningBeat.load(); }
+
     /** Every frame streamed too late since the plugin started (should stay 0). */
     juce::int64 getUnderruns() const                    { return engine.getUnderruns(); }
 
@@ -119,7 +123,8 @@ private:
     size_t eventsRead = 0;
 
     juce::AbstractFifo previewFifo { 64 };
-    std::array<std::pair<int, float>, 64> previews {};
+    struct Preview { int note = 0; float velocity = 0.0f; juce::uint32 at = 0; };      // at: when it was clicked, ms
+    std::array<Preview, 64> previews {};
 
     // Kit
     juce::String kitId, mixFor, restoredKit;
@@ -150,7 +155,9 @@ private:
     double grooveLength = 0.0, grooveBpm = 120.0, grooveAt = 0.0;
     std::atomic<bool> groovePlaying { false };
     std::atomic<float> groovePosition { 0.0f };
+    std::atomic<double> grooveLengthQ { 0.0 };     // the groove's length, beats, for the window
     std::atomic<double> hostBpm { 0.0 };
+    std::atomic<double> runningBeat { -1.0 };
     bool wasHostPlaying = false;
 
     void timerCallback() override;
