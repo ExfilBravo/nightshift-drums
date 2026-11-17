@@ -1,7 +1,7 @@
 # Nightshift Drums
 
 **Download:** it comes with NightShift's free installers for Windows and Mac, on the
-[NightShift releases page](https://github.com/michaeldedmondson-design/nightshift/releases/latest).
+[NightShift releases page](https://github.com/ExfilBravo/nightshift/releases/latest).
 Free software under the GNU GPL v3 or later ([LICENSE](LICENSE)).
 
 A multi-mic drum plugin (VST3 on Windows; VST3, AU and a standalone app on a Mac) in the
